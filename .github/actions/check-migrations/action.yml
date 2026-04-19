@@ -58,18 +58,32 @@ runs:
       env:
         # Minimal Django env so settings module loads without a real DB.
         # --check only reads models + existing migrations from disk, no DB I/O.
+        # DEBUG=False so projects that conditionally import dev-only packages
+        # (debug_toolbar, django-extensions) in DEBUG mode don't crash here.
         DJANGO_SECRET_KEY: ci-migrations-check-secret
-        DJANGO_DEBUG: 'True'
-        DJANGO_ALLOWED_HOSTS: 'localhost,127.0.0.1'
+        DJANGO_DEBUG: 'False'
+        DJANGO_ALLOWED_HOSTS: 'localhost,127.0.0.1,testserver'
         DATABASE_URL: 'sqlite:///tmp/migrations_check.sqlite3'
         REDIS_URL: 'redis://localhost:6379/0'
       run: |
+        set +e
         echo "Checking that models.py is in sync with migrations/..."
-        if ! python "${{ inputs.manage-py }}" makemigrations --check --dry-run --verbosity=2; then
+        output=$(python "${{ inputs.manage-py }}" makemigrations --check --dry-run --verbosity=2 2>&1)
+        rc=$?
+        echo "$output"
+        if [ $rc -eq 0 ]; then
+          echo "OK — migrations are in sync with models."
+          exit 0
+        fi
+        # Distinguish: ModuleNotFoundError / ImportError / settings issue vs. real drift
+        if echo "$output" | grep -qiE "(ModuleNotFoundError|ImportError|ImproperlyConfigured|AppRegistryNotReady)"; then
           echo ""
-          echo "::error::Migrations drift detected. Some app models have changes that are NOT captured in a migration file."
-          echo "::error::Run 'python manage.py makemigrations' locally, commit the generated files, and push."
-          echo "::error::See dry-run output above to know which apps drifted."
+          echo "::error::Django failed to boot for the migration check. This is a settings / dependency problem, not a migration drift."
+          echo "::error::Likely fix: make sure the minimal env vars above satisfy settings.py, and that any modules imported at top-level of settings/ are in requirements. See traceback above."
           exit 1
         fi
-        echo "OK — migrations are in sync with models."
+        echo ""
+        echo "::error::Migrations drift detected. Some app models have changes that are NOT captured in a migration file."
+        echo "::error::Run 'python manage.py makemigrations' locally, commit the generated files, and push."
+        echo "::error::See dry-run output above to know which apps drifted."
+        exit 1
