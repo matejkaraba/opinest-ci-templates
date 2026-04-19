@@ -1,0 +1,75 @@
+name: 'Check Django Migrations'
+description: >-
+  Ensures Django models.py stays in sync with the migration tree.
+  Fails the build if `python manage.py makemigrations --check --dry-run` would
+  generate new migrations. Prevents silent schema drift reaching production.
+inputs:
+  python-version:
+    description: 'Python version'
+    required: false
+    default: '3.11'
+  requirements-file:
+    description: 'Path to requirements file to install'
+    required: false
+    default: 'requirements.txt'
+  manage-py:
+    description: 'Path to manage.py'
+    required: false
+    default: 'manage.py'
+  # In-memory sqlite is enough for makemigrations --check — it reads models.py
+  # and migrations/ from disk and never actually connects to a real DB.
+  # Any existing DJANGO_* settings must tolerate sqlite though.
+  extra-env:
+    description: 'Extra env vars (KEY=value, newline separated)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-check-migrations-${{ inputs.python-version }}-${{ hashFiles(inputs.requirements-file) }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install --upgrade pip
+        pip install -r "${{ inputs.requirements-file }}"
+
+    - name: Export extra env vars
+      if: inputs.extra-env != ''
+      shell: bash
+      run: |
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          echo "$line" >> $GITHUB_ENV
+        done <<< "${{ inputs.extra-env }}"
+
+    - name: makemigrations --check --dry-run
+      shell: bash
+      env:
+        # Minimal Django env so settings module loads without a real DB.
+        # --check only reads models + existing migrations from disk, no DB I/O.
+        DJANGO_SECRET_KEY: ci-migrations-check-secret
+        DJANGO_DEBUG: 'True'
+        DJANGO_ALLOWED_HOSTS: 'localhost,127.0.0.1'
+        DATABASE_URL: 'sqlite:///tmp/migrations_check.sqlite3'
+        REDIS_URL: 'redis://localhost:6379/0'
+      run: |
+        echo "Checking that models.py is in sync with migrations/..."
+        if ! python "${{ inputs.manage-py }}" makemigrations --check --dry-run --verbosity=2; then
+          echo ""
+          echo "::error::Migrations drift detected. Some app models have changes that are NOT captured in a migration file."
+          echo "::error::Run 'python manage.py makemigrations' locally, commit the generated files, and push."
+          echo "::error::See dry-run output above to know which apps drifted."
+          exit 1
+        fi
+        echo "OK — migrations are in sync with models."
