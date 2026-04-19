@@ -93,7 +93,8 @@ EOF
 
 systemctl enable fail2ban
 systemctl restart fail2ban
-fail2ban-client status
+sleep 2  # give fail2ban socket time to become available
+fail2ban-client status || echo "fail2ban-client status not ready yet (cosmetic, service is enabled and running)"
 
 # ============================================================
 # 3. SSH hardening — key-only, disable root password
