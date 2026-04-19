@@ -1,0 +1,99 @@
+name: 'Check Alembic Migrations'
+description: >-
+  Runs `alembic check` to detect schema drift in FastAPI / SQLAlchemy projects.
+  Fails the build if the current SQLAlchemy metadata would produce a new
+  migration that is not in the migration tree.
+  Caller must provide a DB (typically via `services: postgres`) and any app
+  env vars needed for settings to import (DATABASE_URL, SECRET_KEY, etc.).
+inputs:
+  python-version:
+    description: 'Python version'
+    required: false
+    default: '3.11'
+  requirements-file:
+    description: 'Path to requirements file'
+    required: false
+    default: 'requirements.txt'
+  alembic-ini:
+    description: 'Path to alembic.ini'
+    required: false
+    default: 'alembic.ini'
+  working-directory:
+    description: 'Directory to cd into before running alembic (where alembic.ini lives)'
+    required: false
+    default: '.'
+  extra-env:
+    description: >-
+      Extra env vars (KEY=value, newline separated) passed to alembic. Caller
+      should include DATABASE_URL / DATABASE_URL_SYNC and any settings env
+      needed for models to import. Secret-free values only — for real
+      secrets, use the workflow's `env:` block or `secrets.XXX`.
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-check-alembic-${{ inputs.python-version }}-${{ hashFiles(inputs.requirements-file) }}
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        pip install --upgrade pip
+        pip install -r "${{ inputs.requirements-file }}"
+
+    - name: Export extra env vars
+      if: inputs.extra-env != ''
+      shell: bash
+      run: |
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          echo "$line" >> $GITHUB_ENV
+        done <<< "${{ inputs.extra-env }}"
+
+    - name: Bring DB to HEAD (alembic upgrade head)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set +e
+        echo "Applying all existing migrations to empty DB..."
+        alembic -c "${{ inputs.alembic-ini }}" upgrade head
+        rc=$?
+        if [ $rc -ne 0 ]; then
+          echo "::error::alembic upgrade head failed — DB connection or migration error. Check env vars and that Postgres service is up."
+          exit 1
+        fi
+
+    - name: alembic check (schema vs models drift)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set +e
+        echo "Checking SQLAlchemy metadata vs migrations HEAD..."
+        output=$(alembic -c "${{ inputs.alembic-ini }}" check 2>&1)
+        rc=$?
+        echo "$output"
+        if [ $rc -eq 0 ]; then
+          echo "OK — models are in sync with migrations."
+          exit 0
+        fi
+        # Distinguish: settings bootstrap failure vs real drift
+        if echo "$output" | grep -qiE "(ModuleNotFoundError|ImportError|no module named|CalledProcessError|could not connect|connection refused)"; then
+          echo ""
+          echo "::error::alembic failed to boot. This is a settings / dependency / DB connectivity problem, not a migration drift. Check extra-env vars and that a DB service is reachable."
+          exit 1
+        fi
+        echo ""
+        echo "::error::Migrations drift detected. SQLAlchemy models have changes NOT captured in a migration file."
+        echo "::error::Run 'alembic revision --autogenerate -m \"<message>\"' locally, review the generated file, commit, and push."
+        exit 1

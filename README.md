@@ -23,7 +23,8 @@ Reusable GitHub Actions composite actions and workflow templates for Opinest in-
   lint-svelte/        # prettier + eslint + tsc pre SvelteKit (OpiReports frontend)
   lint-fastapi/       # ruff + mypy pre FastAPI (DodPDF)
   lint-node/          # eslint + prettier + tsc pre Node (ProTechSocial)
-  check-migrations/   # Django makemigrations --check (prevents schema drift)
+  check-migrations/             # Django makemigrations --check (prevents schema drift)
+  check-alembic-migrations/     # Alembic check (FastAPI / SQLAlchemy drift)
   secret-scan/        # gitleaks v CI (druhá vrstva po pre-commit)
   deps-audit/         # pip-audit / npm audit
   ai-code-review/     # Claude API security-reviewer
