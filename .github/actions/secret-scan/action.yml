@@ -1,0 +1,51 @@
+name: 'Secret Scan'
+description: 'Skenuje codebase na leaknuté secrets pomocou gitleaks (CI druhá vrstva po pre-commit)'
+inputs:
+  gitleaks-version:
+    description: 'Gitleaks version'
+    required: false
+    default: '8.21.2'
+  config-path:
+    description: 'Path to .gitleaks.toml config (optional, default config sa použije)'
+    required: false
+    default: ''
+  fail-on-detection:
+    description: 'Fail action ak nájde secret (true/false)'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout full history (gitleaks needs it)
+      shell: bash
+      run: |
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          git fetch --unshallow || true
+        fi
+
+    - name: Install gitleaks
+      shell: bash
+      run: |
+        wget -q https://github.com/gitleaks/gitleaks/releases/download/v${{ inputs.gitleaks-version }}/gitleaks_${{ inputs.gitleaks-version }}_linux_x64.tar.gz
+        tar -xzf gitleaks_${{ inputs.gitleaks-version }}_linux_x64.tar.gz
+        sudo mv gitleaks /usr/local/bin/
+        gitleaks version
+
+    - name: Run gitleaks detect (commit history)
+      shell: bash
+      run: |
+        CONFIG_ARG=""
+        if [ -n "${{ inputs.config-path }}" ]; then
+          CONFIG_ARG="--config=${{ inputs.config-path }}"
+        fi
+        if [ "${{ inputs.fail-on-detection }}" = "true" ]; then
+          gitleaks detect --source=. --redact -v $CONFIG_ARG
+        else
+          gitleaks detect --source=. --redact -v $CONFIG_ARG || echo "::warning::gitleaks found potential secrets (non-blocking)"
+        fi
+
+    - name: Run gitleaks protect (uncommitted)
+      shell: bash
+      run: |
+        gitleaks protect --staged --redact -v || true   # advisory pre uncommitted zmeny v PR builde

@@ -1,0 +1,56 @@
+name: 'Lint Django'
+description: 'Lint + format check + type check pre Django apky (ruff + mypy)'
+inputs:
+  python-version:
+    description: 'Python version'
+    required: false
+    default: '3.11'
+  ruff-version:
+    description: 'Ruff version'
+    required: false
+    default: '0.6.9'
+  mypy-enabled:
+    description: 'Run mypy type check (true/false)'
+    required: false
+    default: 'true'
+  paths:
+    description: 'Paths to lint (space-separated)'
+    required: false
+    default: 'apps config'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-lint-django-${{ inputs.python-version }}-${{ inputs.ruff-version }}
+
+    - name: Install ruff and mypy
+      shell: bash
+      run: |
+        pip install --upgrade pip
+        pip install "ruff==${{ inputs.ruff-version }}"
+        if [ "${{ inputs.mypy-enabled }}" = "true" ]; then
+          pip install mypy django-stubs
+        fi
+
+    - name: Ruff lint check
+      shell: bash
+      run: ruff check ${{ inputs.paths }}
+
+    - name: Ruff format check
+      shell: bash
+      run: ruff format --check ${{ inputs.paths }}
+
+    - name: Mypy type check
+      if: inputs.mypy-enabled == 'true'
+      shell: bash
+      continue-on-error: true   # mypy je advisory zatiaľ, nie blocking
+      run: mypy ${{ inputs.paths }} --ignore-missing-imports || echo "::warning::mypy found type issues (non-blocking)"
