@@ -16,6 +16,14 @@ inputs:
     description: 'Path to manage.py'
     required: false
     default: 'manage.py'
+  django-settings-module:
+    description: >-
+      DJANGO_SETTINGS_MODULE for the check. Defaults to the project's
+      manage.py default. Override for projects with split settings where
+      the default (dev.py) imports dev-only deps like debug_toolbar —
+      typically set to the `test` or `prod` settings variant instead.
+    required: false
+    default: ''
   # In-memory sqlite is enough for makemigrations --check — it reads models.py
   # and migrations/ from disk and never actually connects to a real DB.
   # Any existing DJANGO_* settings must tolerate sqlite though.
@@ -65,6 +73,7 @@ runs:
         DJANGO_ALLOWED_HOSTS: 'localhost,127.0.0.1,testserver'
         DATABASE_URL: 'sqlite:///tmp/migrations_check.sqlite3'
         REDIS_URL: 'redis://localhost:6379/0'
+        DJANGO_SETTINGS_MODULE: ${{ inputs.django-settings-module }}
       run: |
         set +e
         echo "Checking that models.py is in sync with migrations/..."
