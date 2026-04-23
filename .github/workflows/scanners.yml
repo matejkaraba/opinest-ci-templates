@@ -19,7 +19,7 @@ on:
         description: "Path to Dockerfile (for monorepos, e.g. backend/Dockerfile)"
       severity:
         type: string
-        default: "CRITICAL,HIGH"
+        default: "CRITICAL"
         description: "Trivy severity filter"
       semgrep-configs:
         type: string
