@@ -1,0 +1,84 @@
+name: Scanners — SAST + CVE + Dockerfile lint (reusable)
+
+# Reusable workflow volaná z repo ci.yml:
+#   jobs:
+#     scanners:
+#       uses: matejkaraba/opinest-ci-templates/.github/workflows/scanners.yml@v1
+#       secrets: inherit
+#       with:
+#         dockerfile-path: Dockerfile        # optional, default: Dockerfile
+#         severity: "CRITICAL,HIGH"          # optional
+#         semgrep-configs: "p/owasp-top-ten p/security-audit p/python p/django p/javascript p/typescript p/dockerfile"
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile-path:
+        type: string
+        default: "Dockerfile"
+        description: "Path to Dockerfile (for monorepos, e.g. backend/Dockerfile)"
+      severity:
+        type: string
+        default: "CRITICAL"
+        description: "Trivy severity filter"
+      semgrep-configs:
+        type: string
+        default: "p/owasp-top-ten p/security-audit p/python p/django p/javascript p/typescript p/dockerfile"
+        description: "Space-separated Semgrep ruleset references"
+      run-container-scan:
+        type: boolean
+        default: true
+        description: "Build image + scan with Trivy (disable for frontend-only repos)"
+
+jobs:
+  dockerfile-lint:
+    runs-on: ubuntu-latest
+    name: Dockerfile lint (hadolint)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ inputs.dockerfile-path }}
+          failure-threshold: warning
+          ignore: DL3008,DL3013
+
+  sast-scan:
+    runs-on: ubuntu-latest
+    name: SAST (Semgrep OWASP + stack rulesets)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: semgrep/semgrep-action@v1
+        with:
+          config: ${{ inputs.semgrep-configs }}
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+  filesystem-scan:
+    runs-on: ubuntu-latest
+    name: Dependency CVE scan (Trivy fs)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: ${{ inputs.severity }}
+          exit-code: '1'
+          ignore-unfixed: true
+          format: table
+
+  container-scan:
+    runs-on: ubuntu-latest
+    name: Container image CVE scan (Trivy image)
+    if: ${{ inputs.run-container-scan }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (scan-only, not pushed)
+        run: docker build -t local-scan:${{ github.sha }} -f ${{ inputs.dockerfile-path }} .
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: local-scan:${{ github.sha }}
+          severity: ${{ inputs.severity }}
+          exit-code: '1'
+          ignore-unfixed: true
+          format: table

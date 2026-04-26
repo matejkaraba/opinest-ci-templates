@@ -13,7 +13,7 @@ Reusable GitHub Actions composite actions and workflow templates for Opinest in-
 - Sentry error tracking
 - Server-side hardening (fail2ban, nginx rate limit, ModSecurity, UFW)
 - UptimeRobot monitoring
-- Slack notifikácie do `#claude-matej`
+- Slack notifikácie do `#claude-dev`
 
 ## Štruktúra
 
