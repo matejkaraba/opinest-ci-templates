@@ -73,6 +73,22 @@ jobs:
     if: ${{ inputs.run-container-scan }}
     steps:
       - uses: actions/checkout@v4
+      # Ubuntu-latest runners ship with ~12 GB free. Docker images for ML
+      # apps (Torch, CLIP, OpenCV) easily eat 6+ GB on top of the layer
+      # cache and Trivy's image export. Clear unused tooling first so the
+      # build + scan don't OOM the disk and abort with "no space left on
+      # device". Frees ~25-30 GB.
+      - name: Free disk space before docker build
+        run: |
+          set -eu
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/PyPy \
+            /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/go || true
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          sudo apt-get -y autoremove --purge >/dev/null 2>&1 || true
+          sudo apt-get -y clean >/dev/null 2>&1 || true
+          echo "After:"; df -h /
       - name: Build image (scan-only, not pushed)
         run: docker build -t local-scan:${{ github.sha }} -f ${{ inputs.dockerfile-path }} .
       - uses: aquasecurity/trivy-action@0.35.0
