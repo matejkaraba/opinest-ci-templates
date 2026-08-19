@@ -24,9 +24,10 @@ inputs:
       typically set to the `test` or `prod` settings variant instead.
     required: false
     default: ''
-  # In-memory sqlite is enough for makemigrations --check — it reads models.py
-  # and migrations/ from disk and never actually connects to a real DB.
-  # Any existing DJANGO_* settings must tolerate sqlite though.
+  # Sqlite v /tmp stačí. `makemigrations --check` číta models.py a
+  # migrations/ z disku; od Django 6.1 si ale otvára aj spojenie, takže
+  # cesta musí byť zapisovateľná. Existujúce DJANGO_* nastavenia musia
+  # sqlite tolerovať.
   extra-env:
     description: 'Extra env vars (KEY=value, newline separated)'
     required: false
@@ -71,7 +72,14 @@ runs:
         DJANGO_SECRET_KEY: ci-migrations-check-secret
         DJANGO_DEBUG: 'False'
         DJANGO_ALLOWED_HOSTS: 'localhost,127.0.0.1,testserver'
-        DATABASE_URL: 'sqlite:///tmp/migrations_check.sqlite3'
+        # Štyri lomky, nie tri: `sqlite:///tmp/x` je pre django-environ
+        # RELATÍVNA cesta `tmp/x`, a adresár `tmp/` v checkoute nie je, takže
+        # sqlite súbor nevie založiť. Do Django 6.0 to nevadilo, lebo
+        # `makemigrations --check` sa na databázu nepripájal. Od 6.1 sa
+        # pripája (sonduje `supports_json_field`) a job padne na
+        # „unable to open database file", čo navyše krok nižšie ohlási ako
+        # „migrations drift", hoci žiadny drift nie je.
+        DATABASE_URL: 'sqlite:////tmp/migrations_check.sqlite3'
         REDIS_URL: 'redis://localhost:6379/0'
         DJANGO_SETTINGS_MODULE: ${{ inputs.django-settings-module }}
       run: |
